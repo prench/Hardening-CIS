@@ -1,11 +1,21 @@
 ---
 - name: Security hardening based on CIS Standards
-  hosts: all
+  hosts: aix
   vars:
     id:
      - usr: root
      - usr: oracle
+  roles:
+     - hk
   tasks:
+
+   - name: Setup Standard motd
+     template:
+      src: /repo/templates/motd.j2
+      dest: /etc/motd
+      owner: bin
+      group: bin
+      mode: 0644
 
    - name: Secure /etc/security - mode 0750
      file:
@@ -21,12 +31,16 @@
       mode: "go-w,o-rx"
      register: security
 
-   - name: Secure cron.allow - mode root.sys 0400
+   - name: Secure at.allow & cron.allow - mode root.sys 0400
      file:
-      path: /var/adm/cron/cron.allow
+      path: "{{ item }}"
       owner: root
       group: sys
       mode: 0400
+      state: absent
+     loop:
+        - /var/adm/cron/cron.allow
+        - /var/adm/cron/at.allow
 
    - name: Secure /etc/motd - mode bin.bin 0644
      file:
@@ -64,6 +78,35 @@
       mode: 0750
      ignore_errors: yes
      loop: "{{ homefolder.stdout_lines }}"
+
+   - name: Find orphaned files/directories
+     shell: find / \( -type d -o -type f \) \( -nouser -o -nogroup \) -ls | awk '{print $11}'
+     ignore_errors: yes
+     register: orphaned
+
+   - name: Set root:system to orphaned files/directories
+     file:
+      path: "{{ item }}"
+      owner: root
+      group: system
+     loop: "{{ orphaned.stdout_lines }}"
+
+   - name: Search .profile files
+     find:
+      paths: '/'
+      patterns: '*.profile'
+      recurse: yes
+      hidden: yes
+     register: profileout
+
+   - name: Set root as .profile files owner
+     file:
+      path: "{{ item.path }}"
+      owner: root
+     loop: "{{ profileout.files }}"
+     loop_control:
+      label: "{{ item.path }}"
+
 
    - name: Secure /etc/group & /etc/passwd - mode root.security 0644
      file:
@@ -110,9 +153,10 @@
       mode: "o-rwx"
 
    - name: Disable Remote Services - mode ugo-rwx
+     # rsh had to be set apart since it didn't work with the file module
      file:
       path: "{{ item }}"
-      mode: "ugo-rwx"
+      mode: '0000'
      loop:
        - /usr/bin/rcp
        - /usr/bin/rlogin
@@ -120,7 +164,34 @@
        - /usr/sbin/rshd
        - /usr/sbin/tftpd
 
-   - name: TCP/IP hardening parameters
+   - name: Disable rsh - mode ugo-rwx
+     command: chmod ugo= /usr/bin/rsh
+     args:
+       warn: no
+
+   - name: Configure sendmail greeting
+     lineinfile:
+      path: /etc/mail/sendmail.cf
+      regexp: '^(O\sSmtpGreetingMessage\=)\$j\sSendmail\s\$b'
+      line: '\g<1>mailerready'
+      backup: yes
+      backrefs: yes
+
+   - name: Secure /etc/mail/sendmail.cf - mode 640
+     file:
+      path: /etc/mail/sendmail.cf
+      owner: root
+      group: system
+      mode: '0640'
+
+   - name: Secure /var/spool/mqueue - mode 700
+     file:
+      path: /var/spool/mqueue
+      owner: root
+      group: system
+      mode: '0700'
+
+   - name: Harden TCP/IP parameters
      command: no -p -o "{{ item }}"
      loop:
        - ipsrcrouteforward=0
@@ -144,13 +215,13 @@
        - directed_broadcast=0
        - tcp_pmtu_discover=0
 
-   - name: TCP/IP hardening parameters - nfs
+   - name: Harden TCP/IP parameters - nfs
      command: nfso -p -o "{{ item }}"
      loop:
        - portcheck=1
        - nfs_use_reserved_ports=1
 
-   - name: SNMP Configuration
+   - name: Secure SNMP Configuration
      replace:
       path: /etc/snmpd.conf
       regexp: "{{ item.regexp }}"
@@ -160,6 +231,18 @@
        - { regexp: '^community(.+)private', line: '#community      private' }
        - { regexp: '^community(.+)system', line: '#community      system' }
        - { regexp: '(?P<comm>^community\s*\w*\s\b(?:\d{1,3}\.){3}\d{1,3}\b\s\b(?:\d{1,3}\.){3}\d{1,3}\b)\s(?P<rw>readWrite)', line: '\g<comm>      readOnly' }
+
+   - name: Secure /etc/profile - disable talk/write commands
+     lineinfile:
+      path: /etc/profile
+      regexp: '^mesg n(\s.*)$'
+      line: 'mesg n'
+      backup: yes
+
+   - name: Secure /etc/profile - disable coredumps
+     lineinfile:
+      path: /etc/profile
+      line: ulimit -c 0
 
    - name: Remove guest account
      user:
@@ -202,11 +285,15 @@
      command: chuser maxage=8 {{ item.item.usr }}
      loop: "{{ lsusr.results }}"
      when: "item.rc == 0"
+     loop_control:
+      label: "{{ item.item.usr }}"
 
    - name: Set passwd attribs for admin accounts - minlen
      command: chuser minlen=15 {{ item.item.usr }}
      loop: "{{ lsusr.results }}"
      when: "item.rc == 0"
+     loop_control:
+      label: "{{ item.item.usr }}"
 
    - name: Set login attribs
      lineinfile:
@@ -218,7 +305,7 @@
      loop:
         - { regexp: '(\tlogininterval = )(.*)$', line: '\g<1>300' }
         - { regexp: '(\tlogindisable = )(.*)$', line: '\g<1>10' }
-        - { regexp: '(\tloginreenable =)(.*)$', line: '\g<1>360' }
+        - { regexp: '(\tloginreenable = )(.*)$', line: '\g<1>360' }
         - { regexp: '(\tlogintimeout = )(.*)$', line: '\g<1>30' }
         - { regexp: '(\tlogindelay = )(.*)$', line: '\g<1>10' }
         - { regexp: '(\therald = ).*$', line: '\g<1>"SSE Authorised Access Only!\\n\\nLogin:"' }
@@ -231,15 +318,76 @@
        backrefs: yes
        backup: yes
 
-   - name: Find files older than 30 days under /etc/security
-     find:
-      paths: /etc/security
-      patterns: 'login*~,user*~'
-      age: 30d
-     register: hkfiles
+   - name: Remove services from inetd.conf
+     replace:
+       path: /etc/inetd.conf
+       regexp: '(^(\w.+)$|^(\s\w.+)$)'
+       replace: '# \g<1>'
+       backup: yes
 
-   - name: Delete files older than 30 days under /etc/security
-     file:
-      path: "{{ item.path }}"
-      state: absent
-     loop: "{{ hkfiles.files }}"
+   - name: Disable daemons from /etc/rc.tcpip
+     lineinfile:
+       path: /etc/rc.tcpip
+       regexp: "{{ item.regexp }}"
+       line: "{{ item.line }}"
+       backrefs: yes
+       backup: yes
+     loop:
+        - {regexp: '^start /usr/sbin/inetd(.*)$' ,line: '#start /usr/sbin/inetd \g<1>'}
+        - {regexp: '^start /usr/lib/sendmail(.*)$' ,line: '#start /usr/lib/sendmail \g<1>'}
+        - {regexp: '^start /usr/sbin/snmpd(.*)$' ,line: '#start /usr/sbin/snmpd \g<1>'}
+        - {regexp: '^start /usr/sbin/dhcprd(.*)$' ,line: '#start /usr/sbin/dhcprd \g<1>'}
+        - {regexp: '^start /usr/sbin/dhcpcd(.*)$' ,line: '#start /usr/sbin/dhcpcd \g<1>'}
+        - {regexp: '^start /usr/sbin/dhcpsd(.*)$' ,line: '#start /usr/sbin/dhcpsd \g<1>'}
+        - {regexp: '^start /usr/sbin/autoconf6(.*)$' ,line: '#start /usr/sbin/autoconf6 \g<1>'}
+        - {regexp: '^start /usr/sbin/gated(.*)$' ,line: '#start /usr/sbin/gated \g<1>'}
+        - {regexp: '^start /usr/sbin/mrouted(.*)$' ,line: '#start /usr/sbin/mrouted \g<1>'}
+        - {regexp: '^start /usr/sbin/named(.*)$' ,line: '#start /usr/sbin/named \g<1>'}
+        - {regexp: '^start /usr/sbin/routed(.*)$' ,line: '#start /usr/sbin/routed \g<1>'}
+        - {regexp: '^start /usr/sbin/rwhod(.*)$' ,line: '#start /usr/sbin/rwhod \g<1>'}
+        - {regexp: '^start /usr/sbin/timed(.*)$' ,line: '#start /usr/sbin/timed \g<1>'}
+        - {regexp: '^start /usr/sbin/dpid2(.*)$' ,line: '#start /usr/sbin/dpid2 \g<1>'}
+        - {regexp: '^start /usr/sbin/hostmibd(.*)$' ,line: '#start /usr/sbin/hostmibd \g<1>'}
+        - {regexp: '^start /usr/sbin/snmpmibd(.*)$' ,line: '#start /usr/sbin/snmpmibd \g<1>'}
+        - {regexp: '^start /usr/sbin/aixmibd(.*)$' ,line: '#start /usr/sbin/aixmibd \g<1>'}
+        - {regexp: '^start /usr/sbin/ndpd-host(.*)$' ,line: '#start /usr/sbin/ndpd-host \g<1>'}
+        - {regexp: '^start /usr/sbin/ndpd-router(.*)$' ,line: '#start /usr/sbin/ndpd-router \g<1>'}
+
+
+   - name: Check daemons enabled on innitab
+     command: lsitab {{ item }}
+     loop:
+       - writesrv
+       - i4ls
+       - pmd
+       - httpdlite
+       - rcns
+       - qdaemon
+       - lpd
+       - piobe
+       - dt
+     register: lsitab
+     ignore_errors: yes
+
+   - name: Remove daemons from inittab
+     command: rmitab {{ item.item }}
+     loop: "{{ lsitab.results }}"
+     when: "item.rc == 0"
+     loop_control:
+      label: "{{ item.item }}"
+
+   - name: Check core dumps
+     command: lssec -f /etc/security/limits -s default -a core -a core_hard
+     register: core
+
+   - name: Disable core dumps
+     command: chsec -f /etc/security/limits -s default -a core=0 -a core_hard=0
+     when: "core.stdout != 'default core=0 core_hard=0'"
+
+   - name: Check full core
+     command: lsattr -El sys0 -a fullcore
+     register: full
+
+   - name: Disable full core
+     command: chdev -l sys0 -a fullcore=false
+     when: "full.stdout != 'fullcore false Enable full CORE dump True'"
