@@ -1,6 +1,6 @@
 ---
 - name: Security hardening based on CIS Standards
-  hosts: aixsse
+  hosts: aix
   vars:
     id:
      - usr: root
