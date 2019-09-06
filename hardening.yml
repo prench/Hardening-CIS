@@ -6,6 +6,7 @@
      - /etc/ansible/vars/hardening_vars.yml
   roles:
      - hk
+     - gpm
   tasks:
   
    - name: Create ansible directory
