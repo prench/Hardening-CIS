@@ -1,0 +1,5 @@
+---
+- name: Setting minlen exception - Check inventory file for more details
+  command: chuser minlen=20 {{ usrmlen }}
+  when: usrmlen is defined
+

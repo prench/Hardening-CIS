@@ -1,0 +1,16 @@
+---
+- name: Find files older than 30 days under /etc/security
+  find:
+    paths: /etc/security
+    patterns: 'login*~,user*~'
+    age: 30d
+  register: hkfiles
+
+- name: Delete files older than 30 days under /etc/security
+  file:
+    path: "{{ item.path }}"
+    state: absent
+  loop: "{{ hkfiles.files }}"
+  loop_control:
+    label: "{{ item.path }}"
+  

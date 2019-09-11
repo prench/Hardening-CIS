@@ -1,0 +1,23 @@
+---
+- name: Copy the list of allowed sgid files
+  template:
+    src: /repo/sgid/sgid_perm_v1
+    dest: /ansible/sgid_perm_v1
+    owner: root
+   
+- name: List sgid files on the server
+  shell: find / -perm -02000 -type f -ls ! -fstype nfs | awk '{print $11}' > /ansible/sgid_files
+
+- name: Expand the list of sgid allowed files
+  script: /repo/ansible/scripts/expand_sgid.sh 
+
+- name: Compare found allowed and listed sgid files  
+  shell: grep -vwf /ansible/sgid_found /ansible/sgid_files | grep -v ^#
+  register: sgid
+
+- name: Remove sgid from files
+  file:
+   path: "{{ item }}"
+   mode: g-s
+  loop: "{{ sgid.stdout_lines }}"
+  ignore_errors: yes

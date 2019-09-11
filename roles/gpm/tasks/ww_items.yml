@@ -1,0 +1,24 @@
+---
+- name: Copy the list of allowed ww_files
+  template:
+    src: /repo/wwitems/ww_perm_v1
+    dest: /ansible/ww_perm_v1
+    owner: root
+
+- name: List ww files on the server
+  shell: find / \( -type d -o -type f \) -perm -o+w -ls | awk '{print $11}' > /ansible/ww_files
+
+- name: Expand the list of ww allowed files
+  script: /repo/ansible/scripts/expand_ww.sh
+
+- name: Compare allowed and listed ww files
+  shell: grep -vwf /ansible/ww_found /ansible/ww_files | grep -v ^#
+  register: ww_items
+  ignore_errors: yes
+
+- name: Remove ww from files
+  file:
+    path: "{{ item }}"
+    mode: o-w
+  loop: "{{ ww_items.stdout_lines }}"
+  ignore_errors: yes

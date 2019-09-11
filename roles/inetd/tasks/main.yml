@@ -1,0 +1,9 @@
+---
+- name: Setting "{{ service }}" exception - Check inventory file for more details
+  lineinfile:
+     path: /etc/inetd.conf
+     regexp: '^#(\s*{{ service }}.*)$'
+     line: '\g<1>'
+     backrefs: yes
+     backup: yes
+

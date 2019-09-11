@@ -1,0 +1,8 @@
+---
+- name: Setting maxage exception - Check inventory file for more details 
+  command: chuser maxage=0 {{ usrmage }} 
+  when:  usrmage is defined
+
+- name: Setting maxage exception - Check inventory file for more details 
+  command: chuser maxage=0 {{ usrmage2 }}
+  when: usrmage2 is defined

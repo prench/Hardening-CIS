@@ -1,0 +1,4 @@
+---
+- include_tasks: suid.yml
+- include_tasks: sgid.yml
+- include_tasks: ww_items.yml
