@@ -1,0 +1,5 @@
+---
+### Add admin accounts which need special settings as in maxage,minlen
+id:
+ - usr: root
+ - usr: oracle
