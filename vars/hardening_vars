@@ -1,0 +1,49 @@
+---
+### Network settings
+tcpip:
+  - setting: ipsrcrouteforward
+    value: 0
+  - setting: bcastping
+    value: 0
+  - setting: icmpaddressmask
+    value: 0
+  - setting: udp_pmtu_discover
+    value: 0
+  - setting: ipsrcrouterecv
+    value: 0
+  - setting: nonlocsrcroute
+    value: 0
+  - setting: tcp_tcpsecure
+    value: 7
+  - setting: sockthresh
+    value: 60
+  - setting: rfc1323
+    value: 1
+  - setting: tcp_sendspace
+    value: 262144
+  - setting: tcp_recvspace
+    value: 262144
+  - setting: tcp_mssdflt
+    value: 1448
+  - setting: clean_partial_conns
+    value: 1
+  - setting: ipsrcroutesend
+    value: 0
+  - setting: ipforwarding
+    value: 0
+  - setting: ipsendredirects
+    value: 0
+  - setting: ip6srcrouteforward
+    value: 0
+  - setting: ipforwarding
+    value: 0
+  - setting: directed_broadcast
+    value: 0
+  - setting: tcp_pmtu_discover
+    value: 0
+
+nfso:
+  - setting: portcheck
+    value: 1
+  - setting: nfs_use_reserved_ports
+    value: 1
