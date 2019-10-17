@@ -1,0 +1,23 @@
+---
+- name: Fix orphaned files
+  hosts: aixsse
+  gather_facts: false
+  tasks:
+
+   - name: Build the list of filesystems
+     shell: mount | grep -v nfs | grep -v vxodm | grep -v procfs | awk '{print $2}' | tail +3 > /ansible/loffs
+     args:
+       warn: false
+
+   - name: Find orphaned files/directories
+     shell: find $(cat /ansible/loffs | tr '\n' ' ') -xdev \( -type d -o -type f \) \( -nouser -o -nogroup \) -ls | awk '{print $11}'
+     ignore_errors: yes
+     register: orphaned
+     changed_when: false
+
+   - name: Set root:system to orphaned files/directories
+     file:
+      path: "{{ item }}"
+      owner: root
+      group: system
+     loop: "{{ orphaned.stdout_lines }}"
