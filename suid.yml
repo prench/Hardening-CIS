@@ -1,0 +1,37 @@
+---
+- name: Remove suid files not allowed
+  hosts: aixsse
+  gather_facts: false
+  tasks:
+
+    - name: Copy the list of allowed suid files
+      template:
+       src: /repo/suid/suid_perm_v1
+       dest: /ansible/suid_perm_v1
+       owner: root
+
+    - name: Build the list of filesystems
+      shell: mount | grep -v nfs | grep -v vxodm | grep -v procfs | awk '{print $2}' | tail +3 > /ansible/loffs
+      args:
+       warn: false
+
+    - name: List suid files on the server
+      shell: find $(cat /ansible/loffs | tr '\n' ' ') -xdev -perm -04000 -type f -ls | awk '{print $11}' > /ansible/suid_files
+      changed_when: false
+
+    - name: Expand the list of suid allowed files
+      script: /repo/ansible/scripts/expand_suid.sh
+      changed_when: false
+
+    - name: Compare found allowed and listed suid files
+      shell: grep -vwf /ansible/suid_found /ansible/suid_files | grep -v ^#
+      register: suid
+      changed_when: false
+      ignore_errors: yes
+
+    - name: Remove suid from files
+      file:
+       path: "{{ item }}"
+       mode: u-s
+      loop: "{{ suid.stdout_lines }}"
+      ignore_errors: yes
