@@ -1,0 +1,35 @@
+---
+- name: Configure Aix Auditing
+  hosts: aixsse
+  tasks:
+
+   - name: check filesystem exists
+     command: lsfs /audit
+     register: fsaudit
+     ignore_errors: yes
+
+   - name: Create filesystem
+     aix_filesystem:
+      filesystem: /audit
+      size: 512M
+      state: present
+      vg: rootvg
+     when: "fsaudit.rc == 1"
+
+   - name: mount filesystem
+     aix_filesystem:
+      filesystem: /audit
+      state: mounted
+
+   - name: Set permissions under /audit
+     file:
+      path: /audit
+      mode: 0640
+      recurse: yes
+
+   - name: Set permissions/ownership on /audit
+     file:
+      path: /audit
+      owner: root
+      group: audit
+      mode: 0750
