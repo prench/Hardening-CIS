@@ -1,20 +1,28 @@
 ---
 - name: Security hardening based on Midrange Unix Systems Security Standards
   hosts: aixsse
+  gather_facts: false
   vars_files:
-     - /etc/ansible/vars/usr_vars.yml
-     - /etc/ansible/vars/hardening_vars.yml
-  roles:
-     - hk
-     - gpm
-  tasks:
-  
+   - /etc/ansible/vars/usr_vars.yml
+   - /etc/ansible/vars/hardening_vars.yml
+
+# Pretasks (create ansible directory) were added because when the gpm role is added to the playbook,
+# the folder /ansible and the list of filesystems need to be present in the server before the role runs.
+
+  pre_tasks:
    - name: Create ansible directory
      file:
       path: /ansible
       state: directory
       mode: '0750'
-   
+
+   - name: Build the list of filesystems
+     shell: mount | grep -v nfs | grep -v vxodm | grep -v procfs | awk '{print $2}' | tail +3 > /ansible/loffs
+     args:
+      warn: false
+  roles:
+   - hk
+  tasks:
 
    - name: Setup Standard SSE motd
      template:
@@ -53,7 +61,7 @@
       mode: 0400
      loop:
         - /var/adm/cron/cron.allow
-        - /var/adm/cron/at.allow 
+        - /var/adm/cron/at.allow
 
 
    - name: Secure /etc/motd - mode bin.bin 0644
@@ -74,7 +82,7 @@
    - name: Secure files under /var directory - mode o-rw
      file:
       path: "{{ item }}"
-      mode: "o-rw" 
+      mode: "o-rw"
       state: absent
      loop:
        - /var/ct/RMstart.log
@@ -84,7 +92,7 @@
        - /var/adm/cron.log
        - /smit.log
 
-              
+
    - name: Find users home folder
      shell: lsuser -a home ALL |cut -f2 -d = | grep -Ev '/$|/etc$|/var$|/opt$|/tmp$|/bin$'
      register: homefolder
@@ -96,55 +104,36 @@
       path: "{{ item }}"
       mode: 0750
      ignore_errors: yes
-     loop: "{{ homefolder.stdout_lines }}" 
+     loop: "{{ homefolder.stdout_lines }}"
 
-   
+
    - name: Find path directories
      shell: find $(echo $PATH | tr ':' ' ') -prune -type d \( -perm -002 -o -perm -020 \)
      register: pathdir
      changed_when: false
 
-   - name: Secure path directories - remove write from group/others 
+   - name: Secure path directories - remove write from group/others
      file:
       path: "{{ item }}"
       mode: 'go-w'
      loop: "{{ pathdir.stdout_lines }}"
 
-
-   - name: Find orphaned files/directories
-     shell: find / \( -type d -o -type f \) \( -nouser -o -nogroup \) ! -fstype nfs -ls | awk '{print $11}'
-     ignore_errors: yes
-     register: orphaned
-     changed_when: false
-
-   - name: Set root:system to orphaned files/directories
-     file:
-      path: "{{ item }}"
-      owner: root
-      group: system
-     loop: "{{ orphaned.stdout_lines }}"
-
-
    - name: Search .profile files
-     find:
-      paths: '/'
-      patterns: '*.profile'
-      recurse: yes
-      hidden: yes
+     shell: find $(cat /ansible/loffs | tr '\n' ' ') -xdev -name .profile -ls | awk '{print $11}'
+     ignore_errors: yes
      register: profileout
+     changed_when: false
 
    - name: Set root as .profile files owner
      file:
-      path: "{{ item.path }}"
+      path: "{{ item }}"
       owner: root
-     loop: "{{ profileout.files }}"
-     loop_control:
-      label: "{{ item.path }}"
+     loop: "{{ profileout.stdout_lines}}"
 
-      
+
    - name: Secure /etc/group & /etc/passwd - mode root.security 0644
-     file: 
-      path: "{{ item }}" 
+     file:
+      path: "{{ item }}"
       owner: root
       group: security
       mode: 0644
@@ -152,14 +141,14 @@
        - /etc/group
        - /etc/passwd
 
- 
+
    - name: Secure /etc/syslog.conf - mode root.system 0640
      file:
       path: /etc/syslog.conf
       owner: root
       group: system
       mode: 0640
- 
+
 
    - name: Secure files under /audit & /etc/security/audit - mode root.audit 0640
      file:
@@ -168,14 +157,14 @@
       group: audit
       recurse: yes
       mode: 0640
-     loop: 
+     loop:
        - /etc/security/audit
        - /audit
 
 
    - name: Secure /audit & /etc/security/audit - mode root.audit 0750
      file:
-      path: "{{ item }}" 
+      path: "{{ item }}"
       owner: root
       group: audit
       mode: 0750
@@ -186,26 +175,26 @@
 
    - name: Secure crontab directory - mode .cron 0770
      file:
-      path: /var/spool/cron/crontabs 
+      path: /var/spool/cron/crontabs
       group: cron
       mode: 0770
 
-      
+
    - name: Secure crontab files - mode o-rwx
      file:
       path: /var/spool/cron/crontabs
       group: cron
       recurse: yes
-      mode: "o-rwx" 
+      mode: "o-rwx"
 
 
    - name: Disable Remote Services - mode ugo-rwx
      # rsh had to be set apart since it didn't work with the file module
      file:
       path: "{{ item }}"
-      mode: '0000' 
+      mode: '0000'
      loop:
-       - /usr/bin/rcp 
+       - /usr/bin/rcp
        - /usr/bin/rlogin
        - /usr/sbin/rlogind
        - /usr/sbin/rshd
@@ -281,10 +270,11 @@
 
 
    - name: Secure SNMP Configuration
-     replace: 
+     replace:
       path: /etc/snmpd.conf
       regexp: "{{ item.regexp }}"
-      replace: "{{ item.line }}" 
+      replace: "{{ item.line }}"
+      backup: yes
      loop:
        - { regexp: '^community(.+)public', line: '#community      public' }
        - { regexp: '^community(.+)private', line: '#community      private' }
@@ -299,11 +289,11 @@
       line: 'mesg n'
       backup: yes
 
- 
+
    - name: Secure /etc/profile - disable coredumps
      lineinfile:
       path: /etc/profile
-      line: ulimit -c 0 
+      line: ulimit -c 0
 
 
    - name: Remove guest account
@@ -348,7 +338,7 @@
      command: chuser maxage=8 {{ item.item.usr }}
      loop: "{{ lsusr.results }}"
      when: item.rc == 0
-     loop_control: 
+     loop_control:
       label: "{{ item.item.usr }}"
 
    - name: Set passwd attribs for admin accounts - minlen
@@ -395,8 +385,8 @@
    - name: Disable daemons from /etc/rc.tcpip
      lineinfile:
        path: /etc/rc.tcpip
-       regexp: "{{ item.regexp }}" 
-       line: "{{ item.line }}" 
+       regexp: "{{ item.regexp }}"
+       line: "{{ item.line }}"
        backrefs: yes
        backup: yes
      loop:
@@ -419,7 +409,7 @@
         - {regexp: '^start /usr/sbin/aixmibd(.*)$' ,line: '#start /usr/sbin/aixmibd \g<1>'}
         - {regexp: '^start /usr/sbin/ndpd-host(.*)$' ,line: '#start /usr/sbin/ndpd-host \g<1>'}
         - {regexp: '^start /usr/sbin/ndpd-router(.*)$' ,line: '#start /usr/sbin/ndpd-router \g<1>'}
-        
+
 
    - name: Check daemons enabled on innitab
      command: lsitab {{ item }}
@@ -437,7 +427,7 @@
      ignore_errors: yes
      changed_when: false
 
-   - name: Remove daemons from inittab 
+   - name: Remove daemons from inittab
      command: rmitab {{ item.item }}
      loop: "{{ lsitab.results }}"
      when: item.rc == 0
@@ -480,3 +470,11 @@
    - name: Disable full core
      command: chdev -l sys0 -a fullcore=false
      when: "full.stdout != 'fullcore false Enable full CORE dump True'"
+
+- name: Run Exceptions Approved on the following hosts
+  hosts: excplist
+  gather_facts: false
+  roles:
+     - maxage
+     - minlen
+     - inetd
