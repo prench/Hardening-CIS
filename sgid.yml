@@ -1,0 +1,38 @@
+---
+- name: Remove sgid files not allowed
+  hosts: aixsse
+  gather_facts: false
+
+  tasks:
+
+    - name: Copy the list of allowed sgid files
+      template:
+       src: /repo/sgid/sgid_perm_v1
+       dest: /ansible/sgid_perm_v1
+       owner: root
+
+    - name: Build the list of filesystems
+      shell: mount | grep -v nfs | grep -v vxodm | grep -v procfs | awk '{print $2}' | tail +3 > /ansible/loffs
+      args:
+       warn: false
+
+    - name: List sgid files on the server
+      shell: find $(cat /ansible/loffs | tr '\n' ' ') -xdev -perm -02000 -type f -ls | awk '{print $11}' > /ansible/sgid_files
+      changed_when: false
+
+    - name: Expand the list of sgid allowed files
+      script: /repo/ansible/scripts/expand_sgid.sh
+      changed_when: false
+
+    - name: Compare found allowed and listed sgid files
+      shell: grep -vwf /ansible/sgid_found /ansible/sgid_files | grep -v ^#
+      register: sgid
+      changed_when: false
+      ignore_errors: yes
+
+    - name: Remove sgid from files
+      file:
+       path: "{{ item }}"
+       mode: g-s
+      loop: "{{ sgid.stdout_lines }}"
+      ignore_errors: yes
