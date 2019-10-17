@@ -1,0 +1,33 @@
+---
+- name: Remove world writable items not allowed
+  hosts: aixsse
+  gather_facts: false
+
+  tasks:
+
+    - name: Copy the list of allowed ww_files
+      template:
+       src: /repo/wwitems/ww_perm_v1
+       dest: /ansible/ww_perm_v1
+       owner: root
+
+    - name: List ww files on the server
+      shell: find $(cat /ansible/loffs | tr '\n' ' ') \( -type d -o -type f \) -perm -o+w -ls | awk '{print $11}' > /ansible/ww_files
+      changed_when: false
+
+    - name: Expand the list of ww allowed files
+      script: /repo/ansible/scripts/expand_ww.sh
+      changed_when: false
+
+    - name: Compare allowed and listed ww files
+      shell: grep -vwf /ansible/ww_found /ansible/ww_files | grep -v ^#
+      register: ww_items
+      changed_when: false
+      ignore_errors: yes
+
+    - name: Remove ww from files
+      file:
+       path: "{{ item }}"
+       mode: o-w
+      loop: "{{ ww_items.stdout_lines }}"
+      ignore_errors: yes
